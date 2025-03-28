@@ -1,0 +1,7 @@
+{
+    "require": {
+        "smalot/pdfparser": "^2.11",
+        "tecnickcom/tcpdf": "^6.8",
+        "intervention/image": "^3.11"
+    }
+}
