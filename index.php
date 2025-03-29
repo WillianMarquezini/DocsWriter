@@ -1,6 +1,5 @@
 <?php
 
-
 $type = $_GET['type'] ?? false;
 
 if (!$type) {
@@ -14,7 +13,11 @@ switch ($type) {
         break;
     case 'pdf':
         include_once('PdfGenerator.php');
+        break;
+    case 'pdf2':
+        include_once('PDF2.php');
+        break;
     default:
         echo "indefinido";
-        break;
+
 }
