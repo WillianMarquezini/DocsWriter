@@ -79,7 +79,6 @@ function processPages($pages, $config, $imageManager)
         ];
 
         // Processar imagens (nova forma de extração)
-        $content = $page->getTextArray();
         $elementsData = $page->getDataTm();
 
         foreach ($elementsData as $element) {
@@ -87,11 +86,11 @@ function processPages($pages, $config, $imageManager)
                 try {
                     $imgData = processImage([
                         'data' => $element['image'],
-                        'x' => $element['x'],
-                        'y' => $element['y'],
-                        'w' => $element['width'] ?? 100, // valor padrão caso não exista
+                        'x' => $element['x'] ?? 0,
+                        'y' => $element['y'] ?? 0,
+                        'w' => $element['width'] ?? 100,
                         'h' => $element['height'] ?? 100,
-                        'ext' => 'jpg' // assumindo JPG como padrão
+                        'ext' => 'jpg'
                     ], $pageNumber, $config, $imageManager);
 
                     $elements['images'][] = $imgData;
@@ -100,16 +99,19 @@ function processPages($pages, $config, $imageManager)
                         'data' => $imgData
                     ];
                 } catch (Exception $e) {
-                    // Log do erro sem interromper o processamento
                     error_log("Erro ao processar imagem: " . $e->getMessage());
                 }
             }
         }
 
         // Processar texto e tabelas
-        $textData = $page->getDataTm();
+        $textData = array_filter($page->getDataTm(), function($item) {
+            return isset($item['text']) && isset($item['x']) && isset($item['y']);
+        });
+
+        // Ordenar por posição Y (de cima para baixo)
         usort($textData, function ($a, $b) {
-            return $b['y'] <=> $a['y'];
+            return ($b['y'] ?? 0) <=> ($a['y'] ?? 0);
         });
 
         $columns = detectColumns($pageData['width'], $textData);
@@ -125,10 +127,18 @@ function processPages($pages, $config, $imageManager)
             ];
         }
 
-        // Processar outros elementos textuais
+        // Processar outros elementos textuais com verificação de chaves
         foreach ($textData as $item) {
+            // Garantir que todas as chaves necessárias existam
+            $item = array_merge([
+                'x' => 0,
+                'y' => 0,
+                'text' => ''
+            ], $item);
+
             if (!isPartOfTable($item, $tables)) {
                 $style = detectTextStyle($item['text']);
+                
                 if ($style['size'] > 11) {
                     $elements['toc'][] = [
                         'title' => $item['text'],
@@ -154,7 +164,9 @@ function processPages($pages, $config, $imageManager)
 function generatePHPCode($elements, $config)
 {
     $code = '<?php
-require_once(\'tcpdf/tcpdf.php\');
+require "vendor/autoload.php";
+
+use \TCPDF as TCPDF;
 
 class EnhancedPDF extends TCPDF {
     protected $imageMap = [];
@@ -220,10 +232,11 @@ IMG;
                     break;
 
                 case 'text':
-                    $text = addslashes($item['data']['text']);
+                    var_dump(json_encode($item['style']));
+                    $text = addslashes($item['data'][1]);
                     $style = $item['style'];
-                    $x = $item['data']['x'];
-                    $y = $item['data']['y'];
+                    $x = $item['data'][0][4] ?? 0;
+                    $y = $item['data'][0][5] ?? 0;
 
                     if (preg_match('/https?:\/\/[^\s]+/', $text, $matches)) {
                         $url = $matches[0];
@@ -275,20 +288,29 @@ function processImage($image, $pageNumber, $config, $imageManager)
     $imageFile = $config['images']['directory'] . 'img_' . $counter . '.' . $config['images']['format'];
 
     try {
-        $img = $imageManager->make($image['data']);
+        // Se for um resource GD
+        if (is_resource($image['data']) && get_resource_type($image['data']) === 'gd') {
+            $img = $imageManager->make($image['data']);
+        } 
+        // Se for dados binários
+        else {
+            $img = $imageManager->make($image['data']);
+        }
+        
         $img->encode($config['images']['format'], $config['images']['quality']);
         $img->save($imageFile);
     } catch (Exception $e) {
+        // Fallback: salva os dados brutos
         file_put_contents($imageFile, $image['data']);
     }
 
     return [
         'id' => $counter++,
         'path' => $imageFile,
-        'x' => $image['x'],
-        'y' => $image['y'],
-        'w' => $image['w'],
-        'h' => $image['h'],
+        'x' => $image['x'] ?? 0,
+        'y' => $image['y'] ?? 0,
+        'w' => $image['w'] ?? 100,
+        'h' => $image['h'] ?? 100,
         'ext' => $ext,
         'page' => $pageNumber + 1
     ];
@@ -299,6 +321,11 @@ function detectTables($items, $config)
     $tables = [];
     $currentTable = [];
     $previousY = null;
+
+    // Filtrar apenas itens que têm texto e coordenadas Y
+    $items = array_filter($items, function($item) {
+        return isset($item['text']) && isset($item['y']);
+    });
 
     foreach ($items as $item) {
         if ($previousY !== null && abs($item['y'] - $previousY) < $config['detection_threshold']) {
@@ -324,6 +351,20 @@ function detectTables($items, $config)
 
 function formatTableData($items)
 {
+    // Garantir que todos os itens tenham as chaves necessárias
+    $items = array_filter($items, function($item) {
+        return isset($item['x']) && isset($item['y']) && isset($item['text']);
+    });
+
+    if (empty($items)) {
+        return [
+            'columns' => [],
+            'rows' => [],
+            'x' => 0,
+            'y' => 0
+        ];
+    }
+
     $columns = array_unique(array_column($items, 'x'));
     sort($columns);
 
@@ -339,7 +380,10 @@ function formatTableData($items)
         $currentRow[] = $item;
         $currentY = $item['y'];
     }
-    $rows[] = $currentRow;
+    
+    if (!empty($currentRow)) {
+        $rows[] = $currentRow;
+    }
 
     return [
         'columns' => $columns,
@@ -368,8 +412,9 @@ function generateTableCode($table, $config)
 
     foreach ($table['rows'] as $row) {
         foreach ($row as $cell) {
-            $code .= '$pdf->SetXY(' . $cell['x'] . ', ' . $y . ');' . "\n";
-            $code .= '$pdf->Cell(40, 6, "' . addslashes($cell['text']) . '", 1, 0, "L");' . "\n";
+            $text = addslashes($cell['text'] ?? '');
+            $code .= '$pdf->SetXY(' . ($cell['x'] ?? 0) . ', ' . $y . ');' . "\n";
+            $code .= '$pdf->Cell(40, 6, "' . $text . '", 1, 0, "L");' . "\n";
         }
         $y += 6;
     }
@@ -380,16 +425,30 @@ function generateTableCode($table, $config)
 // Funções de detecção melhoradas
 function isPotentialTable($items)
 {
+    // Verificar se há itens suficientes
+    if (count($items) < 2) {
+        return false;
+    }
+
+    // Verificar se todos os itens têm coordenadas X
     $xPositions = array_column($items, 'x');
+    if (count($xPositions) !== count($items)) {
+        return false;
+    }
+
     $uniqueX = array_unique($xPositions);
+    if (count($uniqueX) < 2) {
+        return false;
+    }
 
-    if (count($uniqueX) < 2) return false;
-
+    // Verificar padrão de alinhamento vertical
     $yPositions = array_column($items, 'y');
     $yDifferences = [];
-
+    
     for ($i = 1; $i < count($yPositions); $i++) {
-        $yDifferences[] = round($yPositions[$i - 1] - $yPositions[$i], 2);
+        if (isset($yPositions[$i-1]) && isset($yPositions[$i])) {
+            $yDifferences[] = round($yPositions[$i-1] - $yPositions[$i], 2);
+        }
     }
 
     return count(array_unique($yDifferences)) === 1;
@@ -397,6 +456,14 @@ function isPotentialTable($items)
 
 function detectColumns($pageWidth, $items)
 {
+    $items = array_filter($items, function($item) {
+        return isset($item['x']);
+    });
+
+    if (empty($items)) {
+        return null;
+    }
+
     $xPositions = array_column($items, 'x');
     $histogram = array_count_values(array_map(
         fn($x) => round($x / ($pageWidth / 3)),
@@ -449,10 +516,20 @@ function detectTextStyle($text)
 
 function isPartOfTable($item, $tables)
 {
+    if (!isset($item['x']) || !isset($item['y'])) {
+        return false;
+    }
+
     foreach ($tables as $table) {
+        if (!isset($table['rows']) || !is_array($table['rows'])) {
+            continue;
+        }
+
         foreach ($table['rows'] as $row) {
             foreach ($row as $cell) {
-                if ($cell['x'] == $item['x'] && $cell['y'] == $item['y']) {
+                if ((isset($cell['x']) && isset($cell['y'])) &&
+                    (abs($cell['x'] - $item['x']) < 0.1 && 
+                    abs($cell['y'] - $item['y']) < 0.1)) {
                     return true;
                 }
             }
