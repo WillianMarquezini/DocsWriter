@@ -1,7 +1,9 @@
 <?php
 require 'vendor/autoload.php';
+
 use Smalot\PdfParser\Parser;
 use Intervention\Image\ImageManager;
+use Intervention\Image\Drivers\Gd\Driver;
 
 // Configurações avançadas
 $config = [
@@ -25,7 +27,7 @@ $config = [
 
 // Inicializar componentes
 $parser = new Parser();
-$imageManager = new ImageManager(['driver' => 'gd']);
+$imageManager = new ImageManager(new Driver());
 $pdf = $parser->parseFile($config['input']);
 $pages = $pdf->getPages();
 
@@ -56,7 +58,8 @@ echo "- " . count($elements['tables']) . " tabelas detectadas\n";
 echo "- " . count($elements['toc']) . " itens no índice\n";
 
 // Funções principais
-function processPages($pages, $config, $imageManager) {
+function processPages($pages, $config, $imageManager)
+{
     $elements = [
         'metadata' => [],
         'pages' => [],
@@ -66,26 +69,46 @@ function processPages($pages, $config, $imageManager) {
     ];
 
     foreach ($pages as $pageNumber => $page) {
+        $details = $page->getDetails();
+
         $pageData = [
             'number' => $pageNumber + 1,
-            'width' => $page->getWidth(),
-            'height' => $page->getHeight(),
+            'width' => $details['Page width'] ?? 595, // Valor padrão A4 em pontos se não encontrado
+            'height' => $details['Page height'] ?? 842, // Valor padrão A4 em pontos se não encontrado
             'items' => []
         ];
 
-        // Processar imagens
-        foreach ($page->getImages() as $image) {
-            $imgData = processImage($image, $pageNumber, $config, $imageManager);
-            $elements['images'][] = $imgData;
-            $pageData['items'][] = [
-                'type' => 'image',
-                'data' => $imgData
-            ];
+        // Processar imagens (nova forma de extração)
+        $content = $page->getTextArray();
+        $elementsData = $page->getDataTm();
+
+        foreach ($elementsData as $element) {
+            if (isset($element['image']) && $element['image']) {
+                try {
+                    $imgData = processImage([
+                        'data' => $element['image'],
+                        'x' => $element['x'],
+                        'y' => $element['y'],
+                        'w' => $element['width'] ?? 100, // valor padrão caso não exista
+                        'h' => $element['height'] ?? 100,
+                        'ext' => 'jpg' // assumindo JPG como padrão
+                    ], $pageNumber, $config, $imageManager);
+
+                    $elements['images'][] = $imgData;
+                    $pageData['items'][] = [
+                        'type' => 'image',
+                        'data' => $imgData
+                    ];
+                } catch (Exception $e) {
+                    // Log do erro sem interromper o processamento
+                    error_log("Erro ao processar imagem: " . $e->getMessage());
+                }
+            }
         }
 
         // Processar texto e tabelas
         $textData = $page->getDataTm();
-        usort($textData, function($a, $b) {
+        usort($textData, function ($a, $b) {
             return $b['y'] <=> $a['y'];
         });
 
@@ -113,7 +136,7 @@ function processPages($pages, $config, $imageManager) {
                         'y' => $item['y']
                     ];
                 }
-                
+
                 $pageData['items'][] = [
                     'type' => 'text',
                     'data' => $item,
@@ -128,7 +151,8 @@ function processPages($pages, $config, $imageManager) {
     return $elements;
 }
 
-function generatePHPCode($elements, $config) {
+function generatePHPCode($elements, $config)
+{
     $code = '<?php
 require_once(\'tcpdf/tcpdf.php\');
 
@@ -200,7 +224,7 @@ IMG;
                     $style = $item['style'];
                     $x = $item['data']['x'];
                     $y = $item['data']['y'];
-                    
+
                     if (preg_match('/https?:\/\/[^\s]+/', $text, $matches)) {
                         $url = $matches[0];
                         $text = str_replace($url, '', $text);
@@ -218,7 +242,7 @@ TEXT;
 
 TEXT;
                     }
-                    
+
                     if ($style['size'] > 11) {
                         $code .= '$pdf->addTOCItem(\'' . addslashes($item['data']['text']) . '\', ' . $page['number'] . ', ' . $y . ');' . "\n";
                     }
@@ -243,12 +267,13 @@ TEXT;
 }
 
 // Funções auxiliares melhoradas
-function processImage($image, $pageNumber, $config, $imageManager) {
+function processImage($image, $pageNumber, $config, $imageManager)
+{
     static $counter = 1;
-    
+
     $ext = strtolower($image['ext'] ?? 'jpg');
     $imageFile = $config['images']['directory'] . 'img_' . $counter . '.' . $config['images']['format'];
-    
+
     try {
         $img = $imageManager->make($image['data']);
         $img->encode($config['images']['format'], $config['images']['quality']);
@@ -256,7 +281,7 @@ function processImage($image, $pageNumber, $config, $imageManager) {
     } catch (Exception $e) {
         file_put_contents($imageFile, $image['data']);
     }
-    
+
     return [
         'id' => $counter++,
         'path' => $imageFile,
@@ -269,7 +294,8 @@ function processImage($image, $pageNumber, $config, $imageManager) {
     ];
 }
 
-function detectTables($items, $config) {
+function detectTables($items, $config)
+{
     $tables = [];
     $currentTable = [];
     $previousY = null;
@@ -296,14 +322,15 @@ function detectTables($items, $config) {
     return $tables;
 }
 
-function formatTableData($items) {
+function formatTableData($items)
+{
     $columns = array_unique(array_column($items, 'x'));
     sort($columns);
-    
+
     $rows = [];
     $currentRow = [];
     $currentY = null;
-    
+
     foreach ($items as $item) {
         if ($currentY !== null && abs($item['y'] - $currentY) > 5) {
             $rows[] = $currentRow;
@@ -313,7 +340,7 @@ function formatTableData($items) {
         $currentY = $item['y'];
     }
     $rows[] = $currentRow;
-    
+
     return [
         'columns' => $columns,
         'rows' => $rows,
@@ -322,22 +349,23 @@ function formatTableData($items) {
     ];
 }
 
-function generateTableCode($table, $config) {
+function generateTableCode($table, $config)
+{
     $code = "\n// Table at (" . $table['x'] . ", " . $table['y'] . ")\n";
     $code .= '$pdf->SetXY(' . $table['x'] . ', ' . $table['y'] . ');' . "\n";
     $code .= '$pdf->SetFillColor(' . implode(', ', $config['header_bg_color']) . ');' . "\n";
     $code .= '$pdf->SetFont("helvetica", "B", 10);' . "\n";
-    
+
     // Cabeçalho
     foreach ($table['columns'] as $col) {
         $code .= '$pdf->SetXY(' . $col . ', ' . $table['y'] . ');' . "\n";
-        $code .= '$pdf->Cell(40, 6, "Col ' . ($col/10) . '", 1, 0, "C", 1);' . "\n";
+        $code .= '$pdf->Cell(40, 6, "Col ' . ($col / 10) . '", 1, 0, "C", 1);' . "\n";
     }
-    
+
     // Conteúdo
     $code .= '$pdf->SetFont("helvetica", "", 10);' . "\n";
     $y = $table['y'] + 6;
-    
+
     foreach ($table['rows'] as $row) {
         foreach ($row as $cell) {
             $code .= '$pdf->SetXY(' . $cell['x'] . ', ' . $y . ');' . "\n";
@@ -345,43 +373,46 @@ function generateTableCode($table, $config) {
         }
         $y += 6;
     }
-    
+
     return $code . "\n";
 }
 
 // Funções de detecção melhoradas
-function isPotentialTable($items) {
+function isPotentialTable($items)
+{
     $xPositions = array_column($items, 'x');
     $uniqueX = array_unique($xPositions);
-    
+
     if (count($uniqueX) < 2) return false;
-    
+
     $yPositions = array_column($items, 'y');
     $yDifferences = [];
-    
+
     for ($i = 1; $i < count($yPositions); $i++) {
-        $yDifferences[] = round($yPositions[$i-1] - $yPositions[$i], 2);
+        $yDifferences[] = round($yPositions[$i - 1] - $yPositions[$i], 2);
     }
-    
+
     return count(array_unique($yDifferences)) === 1;
 }
 
-function detectColumns($pageWidth, $items) {
+function detectColumns($pageWidth, $items)
+{
     $xPositions = array_column($items, 'x');
     $histogram = array_count_values(array_map(
-        fn($x) => round($x/($pageWidth/3)), 
+        fn($x) => round($x / ($pageWidth / 3)),
         $xPositions
     ));
-    
+
     $columns = [];
     foreach ($histogram as $col => $count) {
-        if ($count > 5) $columns[] = $col * ($pageWidth/3);
+        if ($count > 5) $columns[] = $col * ($pageWidth / 3);
     }
-    
+
     return count($columns) > 1 ? $columns : null;
 }
 
-function detectTextStyle($text) {
+function detectTextStyle($text)
+{
     $style = [
         'font' => 'helvetica',
         'weight' => '',
@@ -392,7 +423,7 @@ function detectTextStyle($text) {
     if (preg_match('/^[A-Z][A-Z0-9\s]+$/', $text)) {
         $style['weight'] = 'B';
         $style['size'] = 14;
-    } 
+    }
     // Títulos com formatação
     elseif (preg_match('/^(#+)\s*(.+)/', $text, $matches)) {
         $level = strlen($matches[1]);
@@ -403,7 +434,7 @@ function detectTextStyle($text) {
     // Listas numeradas
     elseif (preg_match('/^\d+\./', $text)) {
         $style['weight'] = 'B';
-    } 
+    }
     // Marcadores
     elseif (preg_match('/^[•\-]/', $text)) {
         $style['font'] = 'zapfdingbats';
@@ -416,7 +447,8 @@ function detectTextStyle($text) {
     return $style;
 }
 
-function isPartOfTable($item, $tables) {
+function isPartOfTable($item, $tables)
+{
     foreach ($tables as $table) {
         foreach ($table['rows'] as $row) {
             foreach ($row as $cell) {

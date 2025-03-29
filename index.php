@@ -1,6 +1,5 @@
 <?php
 
-
 $type = $_GET['type'] ?? false;
 
 if (!$type) {
