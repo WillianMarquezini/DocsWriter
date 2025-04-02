@@ -9,4 +9,5 @@ return array(
     'Symfony\\Polyfill\\Mbstring\\' => array($vendorDir . '/symfony/polyfill-mbstring'),
     'Intervention\\Image\\' => array($vendorDir . '/intervention/image/src'),
     'Intervention\\Gif\\' => array($vendorDir . '/intervention/gif/src'),
+    'FastRoute\\' => array($vendorDir . '/nikic/fast-route/src'),
 );
