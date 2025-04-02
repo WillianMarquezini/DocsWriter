@@ -2,6 +2,7 @@
     "require": {
         "smalot/pdfparser": "^2.11",
         "tecnickcom/tcpdf": "^6.8",
-        "intervention/image": "^3.11"
+        "intervention/image": "^3.11",
+        "nikic/fast-route": "^1.3"
     }
 }

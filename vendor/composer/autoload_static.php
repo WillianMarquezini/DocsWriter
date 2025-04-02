@@ -8,6 +8,7 @@ class ComposerStaticInit44b3f1a3e0bd53f80ccf260031918b00
 {
     public static $files = array (
         '0e6d7bf4a5811bfa5cf40c5ccd6fae6a' => __DIR__ . '/..' . '/symfony/polyfill-mbstring/bootstrap.php',
+        '253c157292f75eb38082b5acb06f3f01' => __DIR__ . '/..' . '/nikic/fast-route/src/functions.php',
     );
 
     public static $prefixLengthsPsr4 = array (
@@ -19,6 +20,10 @@ class ComposerStaticInit44b3f1a3e0bd53f80ccf260031918b00
         array (
             'Intervention\\Image\\' => 19,
             'Intervention\\Gif\\' => 17,
+        ),
+        'F' => 
+        array (
+            'FastRoute\\' => 10,
         ),
     );
 
@@ -34,6 +39,10 @@ class ComposerStaticInit44b3f1a3e0bd53f80ccf260031918b00
         'Intervention\\Gif\\' => 
         array (
             0 => __DIR__ . '/..' . '/intervention/gif/src',
+        ),
+        'FastRoute\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/nikic/fast-route/src',
         ),
     );
 
@@ -60,8 +69,6 @@ class ComposerStaticInit44b3f1a3e0bd53f80ccf260031918b00
         'TCPDF_FONTS' => __DIR__ . '/..' . '/tecnickcom/tcpdf/include/tcpdf_fonts.php',
         'TCPDF_FONT_DATA' => __DIR__ . '/..' . '/tecnickcom/tcpdf/include/tcpdf_font_data.php',
         'TCPDF_IMAGES' => __DIR__ . '/..' . '/tecnickcom/tcpdf/include/tcpdf_images.php',
-        'TCPDF_IMPORT' => __DIR__ . '/..' . '/tecnickcom/tcpdf/tcpdf_import.php',
-        'TCPDF_PARSER' => __DIR__ . '/..' . '/tecnickcom/tcpdf/tcpdf_parser.php',
         'TCPDF_STATIC' => __DIR__ . '/..' . '/tecnickcom/tcpdf/include/tcpdf_static.php',
     );
 
